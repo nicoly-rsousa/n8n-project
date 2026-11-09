@@ -1,0 +1,441 @@
+{
+  "name": "Processar vagas compatíveis",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "e7b0068f-53a9-4d08-8800-1d57c2137f3a",
+      "name": "Iniciar manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1320,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 30 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "0f43ed3b-4d33-4a59-bf2d-ef587cd9a496",
+      "name": "Agendar dias úteis às 08:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const asList = (value) => String(value || '')\n  .split(',')\n  .map((part) => part.trim())\n  .filter(Boolean);\n\nconst workerUrl = String($env.JOBHUNTER_WORKER_URL || '').replace(/\\/$/, '');\nconst minScore = Number($env.JOBHUNTER_MIN_SCORE || 70);\n\nreturn [{\n  json: {\n    runId: `n8n-${Date.now()}`,\n    // test é o padrão: nenhuma candidatura é enviada até que o worker exista.\n    mode: String($env.JOBHUNTER_MODE || 'test').toLowerCase(),\n    workerUrl,\n    autoApplyEnabled: String($env.JOBHUNTER_AUTO_APPLY || 'false').toLowerCase() === 'true',\n    minScore: Number.isFinite(minScore) ? minScore : 70,\n    profile: {\n      targetRoles: asList($env.JOBHUNTER_TARGET_ROLES || 'desenvolvedor, software engineer'),\n      requiredKeywords: asList($env.JOBHUNTER_REQUIRED_KEYWORDS || 'javascript, typescript'),\n      preferredLocations: asList($env.JOBHUNTER_PREFERRED_LOCATIONS || 'remoto, remote'),\n      resumeRef: String($env.JOBHUNTER_RESUME_REF || 'PREENCHER_REFERENCIA_DO_CURRICULO')\n    }\n  }\n}];"
+      },
+      "id": "206f1c7b-9222-441c-9a2f-4dd82f49efc1",
+      "name": "Carregar perfil e configuração",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1080,
+        220
+      ],
+      "notes": "Lê apenas configurações não secretas. Mantenha JOBHUNTER_AUTO_APPLY=false até o worker ter idempotência e testes concluídos."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "95fe0d73-bda5-47f6-bf0b-a77e59d4de0a",
+              "leftValue": "={{ $json.mode }}",
+              "rightValue": "test",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4823459a-1c77-4bb1-b606-479bb3ce064f",
+      "name": "Usar vagas de teste?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -840,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const config = $input.first().json;\n\n// Fixture local: permite validar a lógica sem portal, conta ou envio real.\nconst jobs = [\n  {\n    source: 'fixture',\n    externalId: 'backend-ts-001',\n    title: 'Desenvolvedor Backend TypeScript',\n    company: 'Empresa Exemplo',\n    location: 'Remoto - Brasil',\n    description: 'Vaga remota para desenvolvimento com JavaScript e TypeScript.',\n    applyUrl: 'https://example.invalid/jobs/backend-ts-001',\n    requiresCaptcha: false,\n    requiresMfa: false,\n    hasUnknownQuestions: false\n  },\n  {\n    source: 'fixture',\n    externalId: 'support-002',\n    title: 'Analista de Suporte',\n    company: 'Empresa Exemplo',\n    location: 'Presencial',\n    description: 'Atendimento e suporte a clientes.',\n    applyUrl: 'https://example.invalid/jobs/support-002',\n    requiresCaptcha: false,\n    requiresMfa: false,\n    hasUnknownQuestions: false\n  },\n  {\n    source: 'fixture',\n    externalId: 'captcha-003',\n    title: 'Software Engineer JavaScript',\n    company: 'Empresa Exemplo',\n    location: 'Remote',\n    description: 'JavaScript e TypeScript.',\n    applyUrl: 'https://example.invalid/jobs/captcha-003',\n    requiresCaptcha: true,\n    requiresMfa: false,\n    hasUnknownQuestions: false\n  }\n];\n\nreturn jobs.map((job) => ({ json: { ...config, job } }));"
+      },
+      "id": "57458503-bf57-41b0-a944-d21d1aee0a32",
+      "name": "Gerar vagas de teste",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        120
+      ],
+      "notes": "Use para a primeira execução. Nenhuma URL example.invalid é acessada e nenhuma candidatura é enviada."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.workerUrl + '/v1/jobs/search' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "744b9f42-41ba-42dc-8b06-4aa0bd258f8e",
+      "name": "Buscar vagas no worker local",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -600,
+        320
+      ],
+      "notes": "Contrato: POST /v1/jobs/search recebe a configuração e devolve { jobs: Job[] }. O worker deve respeitar os termos de cada plataforma."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const config = $('Carregar perfil e configuração').first().json;\nconst payload = $input.first().json;\nconst jobs = Array.isArray(payload) ? payload : (payload.jobs || payload.data?.jobs || []);\n\nif (!Array.isArray(jobs)) {\n  throw new Error('O worker deve devolver { jobs: Job[] }.');\n}\n\nreturn jobs.map((job) => ({ json: { ...config, job } }));"
+      },
+      "id": "3fc9c452-7e55-47ca-b419-4a2fa1e58c92",
+      "name": "Extrair vagas do worker",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -360,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $json;\nconst job = input.job || {};\nconst applyUrl = String(job.applyUrl || job.url || '').trim();\nconst source = String(job.source || 'unknown').trim().toLowerCase();\nconst externalId = String(job.externalId || applyUrl || job.title || '').trim();\n\nif (!job.title || !applyUrl || !externalId) {\n  throw new Error('Cada vaga precisa de title, applyUrl/url e externalId (ou URL única).');\n}\n\nreturn {\n  json: {\n    ...input,\n    job: {\n      ...job,\n      source,\n      externalId,\n      title: String(job.title).trim(),\n      company: String(job.company || 'Não informada').trim(),\n      location: String(job.location || 'Não informada').trim(),\n      description: String(job.description || ''),\n      applyUrl\n    },\n    idempotencyKey: `${source}:${externalId}`\n  }\n};"
+      },
+      "id": "78c47ab4-e20e-4279-9a0c-7d6a6f5dba68",
+      "name": "Normalizar vagas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -120,
+        220
+      ],
+      "notes": "A chave source:externalId deve ter uma restrição UNIQUE no banco do worker para deduplicação entre execuções."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const seen = new Set();\nconst unique = [];\n\nfor (const item of $input.all()) {\n  const key = item.json.idempotencyKey;\n  if (seen.has(key)) continue;\n  seen.add(key);\n  unique.push(item);\n}\n\nreturn unique;"
+      },
+      "id": "6d345244-801d-4a3b-97b4-fd7876fba9f4",
+      "name": "Remover duplicadas do lote",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        120,
+        220
+      ],
+      "notes": "Esta deduplicação vale somente para esta execução. O worker ainda precisa gravar idempotencyKey com UNIQUE para impedir repetição em dias diferentes."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $json;\nconst job = input.job;\nconst profile = input.profile;\nconst text = `${job.title} ${job.description} ${job.location}`.toLowerCase();\nconst includes = (term) => text.includes(String(term).toLowerCase());\n\nconst roleHits = profile.targetRoles.filter(includes);\nconst requiredHits = profile.requiredKeywords.filter(includes);\nconst locationHits = profile.preferredLocations.filter(includes);\nconst score = Math.min(100, (roleHits.length * 40) + (requiredHits.length * 15) + (locationHits.length * 10));\nconst blockedByChallenge = Boolean(job.requiresCaptcha || job.requiresMfa || job.hasUnknownQuestions);\nconst eligible = input.autoApplyEnabled && Boolean(input.workerUrl) && score >= input.minScore && !blockedByChallenge;\n\nreturn {\n  json: {\n    ...input,\n    match: { score, roleHits, requiredHits, locationHits },\n    reviewReason: blockedByChallenge\n      ? 'CAPTCHA, MFA ou pergunta desconhecida exige intervenção humana'\n      : score < input.minScore\n        ? `Compatibilidade ${score} abaixo do mínimo ${input.minScore}`\n        : !input.autoApplyEnabled\n          ? 'Envio automático desativado'\n          : !input.workerUrl\n            ? 'Worker local não configurado'\n            : null,\n    automationDecision: eligible ? 'send' : 'review'\n  }\n};"
+      },
+      "id": "5266c5f9-d4b3-4f50-b848-c6cd417079d3",
+      "name": "Pontuar compatibilidade",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        360,
+        220
+      ],
+      "notes": "O fluxo nunca tenta resolver CAPTCHA ou MFA. Esses casos sempre seguem para revisão."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a9646ddf-9459-4c0d-92fc-7e6d4f17c60e",
+              "leftValue": "={{ $json.automationDecision }}",
+              "rightValue": "send",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "599b57db-7205-4f60-af2f-902830964720",
+      "name": "Pode enviar candidatura?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    status: 'review_required',\n    runId: $json.runId,\n    idempotencyKey: $json.idempotencyKey,\n    job: $json.job,\n    match: $json.match,\n    reason: $json.reviewReason || 'Revisão manual necessária'\n  }\n};"
+      },
+      "id": "47808d1a-3f5b-4322-86e8-85544d3c0fa1",
+      "name": "Preparar fila de revisão",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        340
+      ],
+      "notes": "Nesta primeira versão a fila aparece no resultado da execução. A próxima etapa é persistir esses itens no SQLite do worker ou em uma planilha."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.workerUrl + '/v1/applications/submit' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ job: $json.job, profile: $json.profile, idempotencyKey: $json.idempotencyKey }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "1f06699b-1b1b-40f1-a2f0-65d2b89d01e8",
+      "name": "Solicitar candidatura ao worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        840,
+        120
+      ],
+      "notes": "O worker precisa repetir a checagem de CAPTCHA/MFA, usar a chave de idempotência e registrar o resultado antes de responder."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const response = $json;\nconst original = $('Pode enviar candidatura?').item.json;\nconst status = String(response.status || 'unknown').toLowerCase();\nconst needsReview = ['captcha', 'mfa', 'manual_review', 'unknown_question', 'blocked'].includes(status);\n\nreturn {\n  json: {\n    status: needsReview ? 'review_required' : status,\n    runId: original.runId,\n    idempotencyKey: original.idempotencyKey,\n    job: original.job,\n    match: original.match,\n    workerResponse: response,\n    reason: needsReview ? (response.reason || 'O worker solicitou revisão humana') : undefined\n  }\n};"
+      },
+      "id": "a49b23a4-0851-4b5c-b742-67b8433e7a52",
+      "name": "Registrar resultado do worker",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        120
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Iniciar manualmente": {
+      "main": [
+        [
+          {
+            "node": "Carregar perfil e configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agendar dias úteis às 08:30": {
+      "main": [
+        [
+          {
+            "node": "Carregar perfil e configuração",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carregar perfil e configuração": {
+      "main": [
+        [
+          {
+            "node": "Usar vagas de teste?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Usar vagas de teste?": {
+      "main": [
+        [
+          {
+            "node": "Gerar vagas de teste",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Buscar vagas no worker local",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar vagas de teste": {
+      "main": [
+        [
+          {
+            "node": "Normalizar vagas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar vagas no worker local": {
+      "main": [
+        [
+          {
+            "node": "Extrair vagas do worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair vagas do worker": {
+      "main": [
+        [
+          {
+            "node": "Normalizar vagas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar vagas": {
+      "main": [
+        [
+          {
+            "node": "Remover duplicadas do lote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remover duplicadas do lote": {
+      "main": [
+        [
+          {
+            "node": "Pontuar compatibilidade",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pontuar compatibilidade": {
+      "main": [
+        [
+          {
+            "node": "Pode enviar candidatura?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pode enviar candidatura?": {
+      "main": [
+        [
+          {
+            "node": "Solicitar candidatura ao worker",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar fila de revisão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solicitar candidatura ao worker": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado do worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "versionId": "740b0a0b-bc39-4fad-bc47-f629e55e8a08",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
